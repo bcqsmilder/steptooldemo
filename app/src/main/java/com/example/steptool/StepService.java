@@ -1,10 +1,15 @@
 package com.example.steptool;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.BitmapFactory;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -46,6 +51,13 @@ public class StepService extends Service implements SensorEventListener {
     //传感器
     private SensorManager sensorManager;
 
+
+    private Notification.Builder builder = null;
+
+    private NotificationManager notificationManager = null;
+    private Intent nfIntent= null;
+
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -79,6 +91,11 @@ public class StepService extends Service implements SensorEventListener {
     }
 
 
+
+
+
+
+
     /**
      * 添加传感器监听
      */
@@ -108,8 +125,44 @@ public class StepService extends Service implements SensorEventListener {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        return super.onStartCommand(intent, flags, startId);
-    }
+
+            /**
+             * 此处设将Service为前台，不然当APP结束以后很容易被GC给干掉，
+             * 这也就是大多数音乐播放器会在状态栏设置一个原理大都是相通的
+             */
+            notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+
+            //----------------  针对8.0 新增代码 --------------------------------------
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder = new Notification.Builder(this.getApplicationContext(), ConstantData.CHANNEL_ID);
+                NotificationChannel notificationChannel =new
+                        NotificationChannel(
+                                ConstantData.CHANNEL_ID,
+                                ConstantData.CHANNEL_NAME,
+                                NotificationManager.IMPORTANCE_MIN
+                        );
+                notificationChannel.enableLights(false);//如果使用中的设备支持通知灯，则说明此通知通道是否应显示灯
+                notificationChannel.setShowBadge(false);//是否显示角标
+                notificationChannel.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
+                NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                manager.createNotificationChannel(notificationChannel);
+                builder.setChannelId(ConstantData.CHANNEL_ID);
+            } else {
+                builder = new Notification.Builder(this.getApplicationContext());
+            }
+
+            /**
+             * 设置点击通知栏打开的界面，此处需要注意了，
+             * 如果你的计步界面不在主界面，则需要判断app是否已经启动，
+             * 再来确定跳转页面，这里面太多坑
+             */
+            nfIntent =new  Intent(this, MainActivity.class);
+            setStepBuilder();
+            // 参数一：唯一的通知标识；参数二：通知消息。
+            startForeground(ConstantData.NOTIFY_ID, builder.build());// 开始前台服务
+            return START_STICKY;
+        }
 
     /**
      * 由传感器记录当前用户运动步数，注意：该传感器只在4.4及以后才有，并且该传感器记录的数据是从设备开机以后不断累加，
@@ -247,10 +300,31 @@ public class StepService extends Service implements SensorEventListener {
         } else {
             //有则更新当前的数据
             entity.setSteps("" + currentStep);
-
-
         }
+        setStepBuilder();
+
+    }
+    private void  setStepBuilder() {
+        PendingIntent pendingIntent=PendingIntent.getActivity(this,0,nfIntent,0);
+
+        builder.setContentIntent(pendingIntent);// 设置PendingIntent
+        builder .setLargeIcon(BitmapFactory.decodeResource(this.getResources(),R.mipmap.ic_launcher));
+
+        builder.setContentTitle("今日步数" + currentStep + "步");
+        builder.setSmallIcon(R.mipmap.ic_launcher);
+        builder.setContentText("加油，要记得勤加运动哦");
+        // 获取构建好的Notification
+        Notification stepNotification = builder.build();
+        //调用更新
+        notificationManager.notify(ConstantData.NOTIFY_ID, stepNotification);
     }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        //主界面中需要手动调用stop方法service才会结束
+        stopForeground(true);
+        unregisterReceiver(mInfoReceiver);
+    }
 
 }
